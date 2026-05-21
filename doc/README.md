@@ -48,7 +48,7 @@ ldd ./marketfeed   # 应显示 not a dynamic executable
 ./run-daily.sh
 ```
 
-邮件：在 `config.toml` 的 `[report.email]` 设 `enabled = true`，密码用环境变量 `MARKETFEED_SMTP_USER` / `MARKETFEED_SMTP_PASS`。
+邮件：在 `config.toml` 的 `[report.email]` 设 `enabled = true`，密码用环境变量 `MARKETFEED_SMTP_USER` / `MARKETFEED_SMTP_PASS`。正文为 HTML（适合 Gmail），本地仍保存 `reports/*.md`；QQ 等常用 `smtp_port = 465`。
 
 ## 部署包内容
 

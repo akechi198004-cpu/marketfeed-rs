@@ -187,7 +187,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             let date = chrono::Utc::now().date_naive();
             let path = report::write_markdown_report_for_date(&config, &db, date)?;
             if config.report.email.enabled && config.report.email.send_on_daily {
-                match email::send_daily_report_if_enabled(&config, &path, date).await {
+                match email::send_daily_report_if_enabled(&config, &db, date).await {
                     Ok(()) => {
                         println!(
                             "邮件已发送: {}",

@@ -44,7 +44,7 @@ password_env = "MARKETFEED_SMTP_PASS"
 from = "marketfeed@example.com"
 to = ["your-email@example.com"]
 subject = "市场行情日报 {date}"
-attach_markdown = true
+# 邮件正文为 HTML（Gmail 等客户端直接渲染），本地仍写 reports/*.md
 send_on_daily = true
 
 [[instruments]]

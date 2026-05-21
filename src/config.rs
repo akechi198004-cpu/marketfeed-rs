@@ -59,8 +59,6 @@ pub struct EmailConfig {
     pub to: Vec<String>,
     #[serde(default = "default_email_subject")]
     pub subject: String,
-    #[serde(default = "default_true")]
-    pub attach_markdown: bool,
     /// run-daily 生成报告后自动发送
     #[serde(default = "default_true")]
     pub send_on_daily: bool,
@@ -319,7 +317,6 @@ impl Default for EmailConfig {
             from: String::new(),
             to: Vec::new(),
             subject: default_email_subject(),
-            attach_markdown: true,
             send_on_daily: true,
         }
     }

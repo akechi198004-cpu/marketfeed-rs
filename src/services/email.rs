@@ -1,40 +1,35 @@
 use crate::config::Config;
+use crate::db::Database;
+use crate::services::report::{build_report, render_html, render_plain_email};
 use anyhow::{bail, Context, Result};
 use chrono::NaiveDate;
 use lettre::message::header::ContentType;
-use lettre::message::{Attachment, Body, Message, MultiPart, SinglePart};
+use lettre::message::{Body, Message, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
-use std::path::Path;
 use tracing::info;
 
 pub async fn send_daily_report_if_enabled(
     config: &Config,
-    report_path: &str,
+    db: &Database,
     date: NaiveDate,
 ) -> Result<()> {
     let email = &config.report.email;
     if !email.enabled || !email.send_on_daily {
         return Ok(());
     }
-    send_report_email(config, report_path, date).await
+    send_report_email(config, db, date).await
 }
 
-pub async fn send_report_email(config: &Config, report_path: &str, date: NaiveDate) -> Result<()> {
+pub async fn send_report_email(config: &Config, db: &Database, date: NaiveDate) -> Result<()> {
     let email_cfg = &config.report.email;
     email_cfg.validate()?;
 
-    let markdown = std::fs::read_to_string(report_path)
-        .with_context(|| format!("failed to read report file {report_path}"))?;
-    let filename = Path::new(report_path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("report.md");
+    let report = build_report(config, db, date)?;
+    let html = render_html(&report);
+    let plain = render_plain_email(&report);
 
     let subject = email_cfg.subject_for(date);
-    let intro = format!(
-        "市场行情日报已生成。\n报告日期：{date}\n附件为 Markdown 报告，也可用纯文本正文查看。\n"
-    );
 
     let mut builder = Message::builder()
         .from(
@@ -53,29 +48,21 @@ pub async fn send_report_email(config: &Config, report_path: &str, date: NaiveDa
         );
     }
 
-    let message = if email_cfg.attach_markdown {
-        let attachment =
-            Attachment::new(filename.to_string()).body(markdown.clone(), ContentType::TEXT_PLAIN);
-        builder
-            .multipart(
-                MultiPart::mixed()
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_PLAIN)
-                            .body(Body::new(intro)),
-                    )
-                    .singlepart(attachment),
-            )
-            .context("failed to build multipart email")?
-    } else {
-        builder
-            .singlepart(
-                SinglePart::builder()
-                    .header(ContentType::TEXT_PLAIN)
-                    .body(Body::new(format!("{intro}\n\n{markdown}"))),
-            )
-            .context("failed to build plain email")?
-    };
+    let message = builder
+        .multipart(
+            MultiPart::alternative()
+                .singlepart(
+                    SinglePart::builder()
+                        .header(ContentType::TEXT_PLAIN)
+                        .body(Body::new(plain)),
+                )
+                .singlepart(
+                    SinglePart::builder()
+                        .header(ContentType::TEXT_HTML)
+                        .body(Body::new(html)),
+                ),
+        )
+        .context("failed to build HTML email")?;
 
     let username = email_cfg
         .smtp_username()
@@ -102,8 +89,8 @@ pub async fn send_report_email(config: &Config, report_path: &str, date: NaiveDa
     info!(
         subject = %subject,
         recipients = email_cfg.recipients().join(","),
-        report_path,
-        "report email sent"
+        report_date = %date,
+        "report email sent (HTML)"
     );
     Ok(())
 }
