@@ -1,0 +1,100 @@
+[database]
+path = "marketfeed.sqlite"
+
+[providers]
+stooq_enabled = true
+alpha_vantage_enabled = true
+eastmoney_enabled = true
+
+[providers.alpha_vantage]
+api_key = ""
+api_key_env = "ALPHA_VANTAGE_API_KEY"
+base_url = "https://www.alphavantage.co/query"
+
+[providers.stooq]
+api_key = ""
+api_key_env = "STOOQ_API_KEY"
+base_url = "https://stooq.com/q/d/l/"
+
+[providers.eastmoney]
+base_url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+fund_base_url = "https://fundf10.eastmoney.com/F10DataApi.aspx"
+
+[update]
+default_lookback_days = 7
+max_bootstrap_days = 5000
+retry_count = 2
+retry_delay_ms = 1000
+
+[report]
+output_dir = "reports"
+format = "markdown"
+timezone = "Asia/Shanghai"
+
+# 每日 run-daily 生成报告后发送邮件（密码建议用环境变量，勿提交仓库）
+[report.email]
+enabled = false
+smtp_host = "smtp.example.com"
+smtp_port = 587
+use_tls = true
+username = ""
+password = ""
+username_env = "MARKETFEED_SMTP_USER"
+password_env = "MARKETFEED_SMTP_PASS"
+from = "marketfeed@example.com"
+to = ["your-email@example.com"]
+subject = "市场行情日报 {date}"
+attach_markdown = true
+send_on_daily = true
+
+[[instruments]]
+id = "sh000001"
+name = "上证指数"
+kind = "index"
+market = "SH"
+currency = "CNY"
+timezone = "Asia/Shanghai"
+provider = "eastmoney"
+eastmoney_secid = "1.000001"
+stooq_symbol = "^shc"
+
+[[instruments]]
+id = "gold"
+name = "Gold Spot"
+kind = "commodity"
+market = "GLOBAL"
+currency = "USD"
+timezone = "UTC"
+provider = "alpha_vantage"
+alpha_symbol = "GOLD"
+stooq_symbol = "xauusd"
+
+[[instruments]]
+id = "fund501203"
+name = "501203"
+kind = "etf"
+market = "FUND"
+currency = "CNY"
+timezone = "Asia/Shanghai"
+provider = "eastmoney"
+eastmoney_fund_code = "501203"
+
+[[instruments]]
+id = "fund008763"
+name = "008763"
+kind = "etf"
+market = "FUND"
+currency = "CNY"
+timezone = "Asia/Shanghai"
+provider = "eastmoney"
+eastmoney_fund_code = "008763"
+
+[[instruments]]
+id = "fund000218"
+name = "000218"
+kind = "etf"
+market = "FUND"
+currency = "CNY"
+timezone = "Asia/Shanghai"
+provider = "eastmoney"
+eastmoney_fund_code = "000218"
