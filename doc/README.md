@@ -11,6 +11,8 @@
 | [providers/alpha_vantage.md](./providers/alpha_vantage.md) | Alpha Vantage |
 | [providers/configuration.md](./providers/configuration.md) | 配置说明 |
 | [providers/integration.md](./providers/integration.md) | 调用流程 |
+| [signals.md](./signals.md) | 信号与「连续 N 日」说明 |
+| [build.md](./build.md) | **编译**：本机 release vs opc musl 静态、scp 路径 |
 
 ## 本地开发
 
@@ -19,36 +21,20 @@ cargo build --release
 cargo run -- run-daily
 ```
 
-## 远程部署（Oracle Linux 等）
+## 远程部署（Oracle Linux / opc）
 
-**1. 开发机打静态包（推荐）**
+编译与上传步骤见 **[build.md](./build.md)**（避免误用 `target/release/marketfeed`）。
 
-```bash
-./scripts/build-deploy-package.sh
-```
-
-生成根目录 `marketfeed-deploy.tar.gz`（musl 静态链接，不依赖远程 glibc）。
-
-**2. 上传到远程**
+简要：
 
 ```bash
-scp marketfeed-deploy.tar.gz opc@你的主机:~/
+./scripts/build-opc.sh
+scp marketfeed-deploy/marketfeed opc@你的主机:~/marketfeed-deploy/
 ```
 
-**3. 远程解压运行**
+首次部署可打 tar 包：`./scripts/build-deploy-package.sh`，远程 `init` / `bootstrap` 后日常 `./run-daily.sh`。
 
-```bash
-tar -xzf marketfeed-deploy.tar.gz
-cd marketfeed-deploy
-chmod +x marketfeed run-daily.sh
-ldd ./marketfeed   # 应显示 not a dynamic executable
-
-./marketfeed init
-./marketfeed bootstrap   # 首次拉历史，较久
-./run-daily.sh
-```
-
-邮件：在 `config.toml` 的 `[report.email]` 设 `enabled = true`，密码用环境变量 `MARKETFEED_SMTP_USER` / `MARKETFEED_SMTP_PASS`。正文为 HTML（适合 Gmail），本地仍保存 `reports/*.md`；QQ 等常用 `smtp_port = 465`。
+邮件：在 `config.toml` 的 `[report.email]` 设 `enabled = true`，密码用环境变量 `MARKETFEED_SMTP_USER` / `MARKETFEED_SMTP_PASS`。正文为 HTML（适合 Gmail），含 **连续 N 日买入/卖出**（由历史信号自动统计，见 [signals.md](./signals.md)）；QQ 等常用 `smtp_port = 465`。
 
 ## 部署包内容
 

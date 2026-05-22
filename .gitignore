@@ -15,7 +15,7 @@
 # 部署打包产物（由 scripts/build-deploy-package.sh 生成）
 /marketfeed-deploy/
 /marketfeed-deploy.tar.gz
-/marketfeed-remote-build.tar.gz
+/marketfeed-update.tar.gz
 
 # 环境变量与密钥
 .env

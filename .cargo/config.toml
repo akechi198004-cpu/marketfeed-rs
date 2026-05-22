@@ -1,0 +1,4 @@
+# musl 静态链接（Oracle Linux 等旧 glibc 环境）
+[target.x86_64-unknown-linux-musl]
+linker = "musl-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]

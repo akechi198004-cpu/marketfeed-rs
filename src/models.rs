@@ -61,6 +61,12 @@ pub struct ReportInstrument {
     pub reason: String,
     pub source: Option<String>,
     pub recent_trade_date: Option<NaiveDate>,
+    /// 与当日信号相同、按交易日连续的天数（来自库内历史信号）
+    pub action_streak_days: u32,
+    /// 例如「连续3日卖出」
+    pub action_streak_label: String,
+    /// 连续 ≥2 日同向时的辅助提示（可为空）
+    pub action_streak_hint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,17 +94,4 @@ pub struct MarketReport {
     pub provider_errors: Vec<ProviderErrorRecord>,
     pub freshness: Vec<DataFreshness>,
     pub disclaimer: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BacktestResult {
-    pub start_date: NaiveDate,
-    pub end_date: NaiveDate,
-    pub initial_cash: f64,
-    pub final_cash: f64,
-    pub total_return_pct: f64,
-    pub max_drawdown_pct: f64,
-    pub trades: usize,
-    pub holding_days: usize,
-    pub buy_and_hold_return_pct: f64,
 }

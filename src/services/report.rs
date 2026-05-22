@@ -4,6 +4,9 @@ use crate::models::{DataFreshness, MarketReport, ReportInstrument};
 use crate::services::provider_errors::{
     error_still_relevant, format_error_time, friendly_message, kind_label_zh, provider_label_zh,
 };
+use crate::services::signal_streak::{
+    consecutive_action_streak, streak_hint_zh, streak_label_zh,
+};
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, Utc};
 use std::{fs, path::Path};
@@ -33,7 +36,10 @@ pub fn write_markdown_report_for_date(
     ensure_parent(&path)?;
     fs::write(&path, render_markdown(&report))
         .with_context(|| format!("failed to write {path}"))?;
-    info!(path = %path, "report written");
+    let html_path = path.replace(".md", ".html");
+    fs::write(&html_path, render_html(&report))
+        .with_context(|| format!("failed to write {html_path}"))?;
+    info!(path = %path, html_path = %html_path, "report written");
     Ok(path)
 }
 
@@ -46,6 +52,16 @@ pub(crate) fn build_report(
     let mut freshness = Vec::new();
     for instrument in &config.instruments {
         let signal = db.latest_signal(&instrument.id)?;
+        let recent = db.recent_signals(&instrument.id)?;
+        let (streak_days, streak_action) = consecutive_action_streak(&recent);
+        let (action_streak_label, action_streak_hint) = match streak_action {
+            Some(action) => {
+                let label = streak_label_zh(action, streak_days);
+                let hint = streak_hint_zh(action, streak_days);
+                (label, hint)
+            }
+            None => ("-".to_string(), None),
+        };
         instruments.push(ReportInstrument {
             instrument_id: instrument.id.clone(),
             name: instrument.name.clone(),
@@ -64,6 +80,9 @@ pub(crate) fn build_report(
                 .unwrap_or_else(|| "尚未生成信号。".to_string()),
             source: signal.as_ref().map(|signal| signal.source.clone()),
             recent_trade_date: signal.as_ref().map(|signal| signal.trade_date),
+            action_streak_days: streak_days as u32,
+            action_streak_label,
+            action_streak_hint,
         });
 
         let latest_bar_date = db.latest_bar_date(&instrument.id)?;
@@ -130,10 +149,25 @@ pub(crate) fn render_html(report: &MarketReport) -> String {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title>市场行情日报</title>
+<style type="text/css">
+  body { margin:0; padding:0; width:100% !important; -webkit-text-size-adjust:100%; }
+  .email-root { width:100%; max-width:100%; }
+  .email-container { width:100%; max-width:960px; min-width:280px; }
+  .table-scroll { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .data-table { width:100%; min-width:720px; border-collapse:collapse; }
+  @media only screen and (max-width:640px) {
+    .email-pad { padding:12px !important; }
+    .data-table { min-width:600px; font-size:13px !important; }
+  }
+</style>
 </head>
-<body style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;background:#f5f5f5;">
-<div style="max-width:720px;margin:0 auto;background:#fff;border-radius:8px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+<body style="margin:0;padding:0;width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;background:#f0f2f5;">
+<table class="email-root" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#f0f2f5;">
+<tr><td align="center" style="padding:12px 16px;">
+<table class="email-container" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:960px;background:#ffffff;border-radius:8px;">
+<tr><td class="email-pad" style="padding:20px 28px;">
 "#,
     );
     body.push_str(
@@ -158,17 +192,32 @@ pub(crate) fn render_html(report: &MarketReport) -> String {
         "<li>数据源错误：{}</li>\n",
         report.provider_errors.len()
     ));
+    if let Some(note) = streak_overview_note(report) {
+        body.push_str(&format!("<li>{}</li>\n", escape_html(&note)));
+    }
     body.push_str("</ul>\n");
 
     body.push_str(
         r#"<h2 style="margin:24px 0 12px;font-size:17px;font-weight:600;color:#333;border-bottom:1px solid #eee;padding-bottom:6px;">交易信号</h2>
-<table style="width:100%;border-collapse:collapse;font-size:14px;">
+<p style="margin:0 0 12px;font-size:13px;color:#666;">「连续」按库内各交易日信号统计；连续 2 日以上同向买入/卖出时，说明中会附辅助提示。</p>
+<div class="table-scroll" style="width:100%;overflow-x:auto;">
+<table class="data-table" role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:720px;border-collapse:collapse;font-size:14px;table-layout:fixed;">
+<colgroup>
+<col style="width:9%">
+<col style="width:14%">
+<col style="width:9%">
+<col style="width:8%">
+<col style="width:11%">
+<col style="width:6%">
+<col style="width:43%">
+</colgroup>
 <thead>
 <tr style="background:#f8f9fa;">
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">代码</th>
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">名称</th>
 <th style="text-align:right;padding:10px 8px;border-bottom:2px solid #dee2e6;">收盘价</th>
 <th style="text-align:center;padding:10px 8px;border-bottom:2px solid #dee2e6;">信号</th>
+<th style="text-align:center;padding:10px 8px;border-bottom:2px solid #dee2e6;">连续</th>
 <th style="text-align:right;padding:10px 8px;border-bottom:2px solid #dee2e6;">得分</th>
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">说明</th>
 </tr>
@@ -183,23 +232,25 @@ pub(crate) fn render_html(report: &MarketReport) -> String {
             .unwrap_or_else(|| "-".to_string());
         body.push_str(&format!(
             r#"<tr>
-<td style="padding:8px;border-bottom:1px solid #eee;">{id}</td>
-<td style="padding:8px;border-bottom:1px solid #eee;">{name}</td>
-<td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">{close}</td>
-<td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">{signal}</td>
-<td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">{score}</td>
-<td style="padding:8px;border-bottom:1px solid #eee;color:#555;">{reason}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;vertical-align:top;">{id}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;vertical-align:top;">{name}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;text-align:right;vertical-align:top;white-space:nowrap;">{close}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;text-align:center;vertical-align:top;">{signal}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;text-align:center;vertical-align:top;">{streak}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;text-align:right;vertical-align:top;">{score}</td>
+<td style="padding:8px;border-bottom:1px solid #eee;color:#555;vertical-align:top;word-wrap:break-word;word-break:break-word;">{reason}</td>
 </tr>
 "#,
             id = escape_html(&item.instrument_id),
             name = escape_html(&item.name),
             close = escape_html(&close),
             signal = action_badge_html(&item.action),
+            streak = streak_badge_html(item),
             score = item.score,
-            reason = escape_html(&item.reason),
+            reason = escape_html(&reason_with_streak_hint(item)),
         ));
     }
-    body.push_str("</tbody></table>\n");
+    body.push_str("</tbody></table></div>\n");
 
     body.push_str(
         r#"<h2 style="margin:24px 0 12px;font-size:17px;font-weight:600;color:#333;border-bottom:1px solid #eee;padding-bottom:6px;">数据源错误</h2>
@@ -212,7 +263,8 @@ pub(crate) fn render_html(report: &MarketReport) -> String {
         );
     } else {
         body.push_str(
-            r#"<table style="width:100%;border-collapse:collapse;font-size:14px;">
+            r#"<div class="table-scroll" style="width:100%;overflow-x:auto;">
+<table class="data-table" role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:640px;border-collapse:collapse;font-size:14px;">
 <thead><tr style="background:#f8f9fa;">
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">数据源</th>
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">标的</th>
@@ -239,12 +291,13 @@ pub(crate) fn render_html(report: &MarketReport) -> String {
                 time = escape_html(&format_error_time(&error.created_at)),
             ));
         }
-        body.push_str("</tbody></table>\n");
+        body.push_str("</tbody></table></div>\n");
     }
 
     body.push_str(
         r#"<h2 style="margin:24px 0 12px;font-size:17px;font-weight:600;color:#333;border-bottom:1px solid #eee;padding-bottom:6px;">数据新鲜度</h2>
-<table style="width:100%;border-collapse:collapse;font-size:14px;">
+<div class="table-scroll" style="width:100%;overflow-x:auto;">
+<table class="data-table" role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;min-width:480px;border-collapse:collapse;font-size:14px;">
 <thead><tr style="background:#f8f9fa;">
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">代码</th>
 <th style="text-align:left;padding:10px 8px;border-bottom:2px solid #dee2e6;">名称</th>
@@ -280,11 +333,14 @@ pub(crate) fn render_html(report: &MarketReport) -> String {
             behind = escape_html(&behind),
         ));
     }
-    body.push_str("</tbody></table>\n");
+    body.push_str("</tbody></table></div>\n");
 
     body.push_str(&format!(
         r#"<p style="margin:24px 0 0;font-size:12px;color:#888;line-height:1.4;">{}</p>
-</div>
+</td></tr>
+</table>
+</td></tr>
+</table>
 </body>
 </html>"#,
         escape_html(&report.disclaimer)
@@ -310,24 +366,29 @@ pub(crate) fn render_markdown(report: &MarketReport) -> String {
         "- 信号统计（买入 / 卖出 / 观望）：{buy_count} / {sell_count} / {hold_count}\n"
     ));
     output.push_str(&format!(
-        "- 数据源错误：{}\n\n",
+        "- 数据源错误：{}\n",
         report.provider_errors.len()
     ));
+    if let Some(note) = streak_overview_note(report) {
+        output.push_str(&format!("- {note}\n"));
+    }
+    output.push('\n');
 
     output.push_str("## 交易信号\n\n");
-    output.push_str("| 代码 | 名称 | 收盘价 | 信号 | 得分 | 说明 |\n");
-    output.push_str("| --- | --- | ---: | --- | ---: | --- |\n");
+    output.push_str("| 代码 | 名称 | 收盘价 | 信号 | 连续 | 得分 | 说明 |\n");
+    output.push_str("| --- | --- | ---: | --- | --- | ---: | --- |\n");
     for item in &report.instruments {
         output.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
             escape_md(&item.instrument_id),
             escape_md(&item.name),
             item.latest_close
                 .map(|value| format!("{value:.4}"))
                 .unwrap_or_else(|| "-".to_string()),
             action_label_zh(&item.action),
+            escape_md(&item.action_streak_label),
             item.score,
-            escape_md(&item.reason),
+            escape_md(&reason_with_streak_hint(item)),
         ));
     }
 
@@ -420,6 +481,55 @@ fn escape_html(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn reason_with_streak_hint(item: &ReportInstrument) -> String {
+    let mut text = item.reason.clone();
+    if let Some(hint) = &item.action_streak_hint {
+        if !text.is_empty() {
+            text.push('；');
+        }
+        text.push_str(hint);
+    }
+    text
+}
+
+fn streak_overview_note(report: &MarketReport) -> Option<String> {
+    let mut sells = Vec::new();
+    let mut buys = Vec::new();
+    for item in &report.instruments {
+        if item.action_streak_days >= 2 {
+            if item.action == "SELL" {
+                sells.push(format!("{}({})", item.name, item.action_streak_label));
+            } else if item.action == "BUY" {
+                buys.push(format!("{}({})", item.name, item.action_streak_label));
+            }
+        }
+    }
+    if sells.is_empty() && buys.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if !sells.is_empty() {
+        parts.push(format!("连续卖出关注：{}", sells.join("、")));
+    }
+    if !buys.is_empty() {
+        parts.push(format!("连续买入关注：{}", buys.join("、")));
+    }
+    Some(parts.join("；"))
+}
+
+fn streak_badge_html(item: &ReportInstrument) -> String {
+    let emphasize = item.action_streak_days >= 2
+        && (item.action == "BUY" || item.action == "SELL");
+    let label = escape_html(&item.action_streak_label);
+    if emphasize {
+        format!(
+            r#"<span style="font-size:13px;font-weight:600;color:#1565c0;">{label}</span>"#
+        )
+    } else {
+        format!(r#"<span style="font-size:13px;color:#666;">{label}</span>"#)
+    }
+}
+
 fn action_badge_html(action: &str) -> String {
     let (label, bg, color) = match action {
         "BUY" => ("买入", "#e8f5e9", "#2e7d32"),
@@ -491,7 +601,7 @@ mod tests {
         let markdown = render_markdown(&report);
         assert!(markdown.contains("# 市场行情日报"));
         assert!(markdown.contains("## 数据源错误"));
-        assert!(markdown.contains("| 代码 | 名称 | 收盘价 | 信号 |"));
+        assert!(markdown.contains("| 代码 | 名称 | 收盘价 | 信号 | 连续 |"));
         assert!(markdown.contains("fund501203"));
         let _ = std::fs::remove_file(path);
     }

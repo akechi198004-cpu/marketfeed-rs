@@ -20,20 +20,16 @@ cargo run -- bootstrap
 cargo run -- run-daily
 ```
 
-## 远程部署（Oracle Linux 等旧 glibc）
+## 远程部署（Oracle Linux / opc）
 
 ```bash
-./scripts/build-deploy-package.sh
+./scripts/build-opc.sh
+scp marketfeed-deploy/marketfeed opc@你的主机:~/marketfeed-deploy/
 ```
 
-生成 `marketfeed-deploy.tar.gz`（musl 静态二进制）。上传解压后：
+**编译说明（本机 release vs opc 静态、常见 GLIBC 报错）** → [doc/build.md](doc/build.md)
 
-```bash
-chmod +x marketfeed run-daily.sh
-./marketfeed init && ./marketfeed bootstrap && ./run-daily.sh
-```
-
-详见 [doc/README.md](doc/README.md)。
+部署与 cron → [doc/README.md](doc/README.md)。
 
 ## 配置说明
 
@@ -47,6 +43,7 @@ chmod +x marketfeed run-daily.sh
 ## 文档
 
 - [doc/README.md](doc/README.md) — 文档索引与部署
+- [doc/build.md](doc/build.md) — 编译与 opc 上传
 - [doc/providers/](doc/providers/) — 数据源说明
 
 ## License

@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::db::Database;
-use crate::services::{backtest, bootstrap, email, provider_errors, report, signal, updater};
+use crate::services::{bootstrap, email, provider_errors, report, signal, updater};
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -46,6 +46,14 @@ pub enum Commands {
     Signal {
         #[arg(long, default_value = "config.toml")]
         config: PathBuf,
+        /// 用已有日线回补历史 signals（连续 N 日统计需要）
+        #[arg(long)]
+        backfill: bool,
+        /// 仅回补最近 N 个交易日；默认 120
+        #[arg(long)]
+        backfill_days: Option<usize>,
+        #[arg(long)]
+        instrument: Option<String>,
     },
     Report {
         #[arg(long, default_value = "config.toml")]
@@ -60,16 +68,6 @@ pub enum Commands {
         config: PathBuf,
         #[arg(long)]
         dry_run: bool,
-    },
-    Backtest {
-        #[arg(long, default_value = "config.toml")]
-        config: PathBuf,
-        #[arg(long)]
-        instrument: String,
-        #[arg(long, value_parser = parse_date)]
-        from: NaiveDate,
-        #[arg(long, value_parser = parse_date)]
-        to: NaiveDate,
     },
 }
 
@@ -106,6 +104,19 @@ pub async fn run(cli: Cli) -> Result<()> {
             )
             .await?;
             print_update_summary("Bootstrap", &summary);
+            if !dry_run {
+                let backfill = signal::backfill_signals(
+                    &config,
+                    &db,
+                    signal::BackfillOptions::default(),
+                )?;
+                let total: usize = backfill
+                    .instruments
+                    .iter()
+                    .map(|i| i.signals_written)
+                    .sum();
+                println!("Bootstrap 后已回补历史信号，共写入 {total} 条。");
+            }
         }
         Commands::Update {
             config,
@@ -131,12 +142,46 @@ pub async fn run(cli: Cli) -> Result<()> {
             .await?;
             print_update_summary("Updated", &summary);
         }
-        Commands::Signal { config } => {
+        Commands::Signal {
+            config,
+            backfill,
+            backfill_days,
+            instrument,
+        } => {
             let (config, db) = load(&config)?;
             db.init_schema()?;
+            if backfill {
+                let summary = signal::backfill_signals(
+                    &config,
+                    &db,
+                    signal::BackfillOptions {
+                        instrument_id: instrument,
+                        trading_days: backfill_days,
+                    },
+                )?;
+                for item in &summary.instruments {
+                    if item.signals_written == 0 {
+                        println!(
+                            "{}: 跳过（日线 {} 条，需至少 {} 条）",
+                            item.instrument_id,
+                            item.bars_total,
+                            signal::MIN_HISTORY
+                        );
+                    } else {
+                        println!(
+                            "{}: 回补 {} 条信号（{} ~ {}，日线共 {} 条）",
+                            item.instrument_id,
+                            item.signals_written,
+                            item.first_trade_date.unwrap(),
+                            item.last_trade_date.unwrap(),
+                            item.bars_total
+                        );
+                    }
+                }
+            }
             signal::calculate_and_store(&config, &db)?;
             println!(
-                "Generated signals for {} instruments.",
+                "已写入最新交易日信号，共 {} 个标的。",
                 config.instruments.len()
             );
         }
@@ -184,6 +229,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             let summary = updater::update_recent(&config, &db).await?;
             print_update_summary("Updated", &summary);
             signal::calculate_and_store(&config, &db)?;
+            // 若此前未跑过 backfill，用已有 K 线补齐近期 signals，避免「连续」只有 1～2 日
+            let _ = signal::backfill_signals(&config, &db, signal::BackfillOptions::default())?;
             let date = chrono::Utc::now().date_naive();
             let path = report::write_markdown_report_for_date(&config, &db, date)?;
             if config.report.email.enabled && config.report.email.send_on_daily {
@@ -206,17 +253,6 @@ pub async fn run(cli: Cli) -> Result<()> {
             } else {
                 println!("Run daily completed successfully. Report: {path}");
             }
-        }
-        Commands::Backtest {
-            config,
-            instrument,
-            from,
-            to,
-        } => {
-            let (_config, db) = load(&config)?;
-            db.init_schema()?;
-            let result = backtest::backtest(&db, &instrument, from, to)?;
-            println!("{}", backtest::render_backtest(&result));
         }
     }
 

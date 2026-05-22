@@ -5,19 +5,108 @@ use anyhow::Result;
 use chrono::Utc;
 use tracing::info;
 
-const MIN_HISTORY: usize = 120;
+pub const MIN_HISTORY: usize = 120;
+
+/// 默认只回补最近 120 个交易日的信号（连续统计最多用到 10 条，留足余量）。
+pub const DEFAULT_BACKFILL_TRADING_DAYS: usize = 120;
+
+#[derive(Debug, Clone, Default)]
+pub struct BackfillOptions {
+    pub instrument_id: Option<String>,
+    /// 从最新交易日向前回补的交易日数量；`None` 表示自第 120 根 K 线起全部回补。
+    pub trading_days: Option<usize>,
+}
+
+#[derive(Debug)]
+pub struct BackfillSummary {
+    pub instruments: Vec<BackfillInstrumentSummary>,
+}
+
+#[derive(Debug)]
+pub struct BackfillInstrumentSummary {
+    pub instrument_id: String,
+    pub bars_total: usize,
+    pub signals_written: usize,
+    pub first_trade_date: Option<chrono::NaiveDate>,
+    pub last_trade_date: Option<chrono::NaiveDate>,
+}
 
 pub fn calculate_and_store(config: &Config, db: &Database) -> Result<()> {
     for instrument in &config.instruments {
         let bars = db.latest_bars_for_signal(&instrument.id, 260)?;
-        let signal = calculate_signal(&instrument.id, bars);
+        let signal = calculate_signal(&instrument.id, &bars);
         db.upsert_signal(&signal)?;
         info!(instrument_id = %instrument.id, action = signal.action.as_str(), "stored signal");
     }
     Ok(())
 }
 
-pub(crate) fn calculate_signal(instrument_id: &str, bars: Vec<DailyBar>) -> Signal {
+/// 用已有日线，按每个交易日重算并写入 `signals`（供「连续 N 日」统计）。
+pub fn backfill_signals(config: &Config, db: &Database, options: BackfillOptions) -> Result<BackfillSummary> {
+    let trading_days = options
+        .trading_days
+        .unwrap_or(DEFAULT_BACKFILL_TRADING_DAYS);
+    let mut instruments = Vec::new();
+
+    for instrument in &config.instruments {
+        if let Some(filter) = &options.instrument_id {
+            if &instrument.id != filter {
+                continue;
+            }
+        }
+
+        let bars = db.daily_bars_ascending(&instrument.id)?;
+        if bars.len() < MIN_HISTORY {
+            info!(
+                instrument_id = %instrument.id,
+                bars = bars.len(),
+                "skip backfill: insufficient daily bars"
+            );
+            instruments.push(BackfillInstrumentSummary {
+                instrument_id: instrument.id.clone(),
+                bars_total: bars.len(),
+                signals_written: 0,
+                first_trade_date: None,
+                last_trade_date: bars.last().map(|b| b.trade_date),
+            });
+            continue;
+        }
+
+        let start_idx = bars.len().saturating_sub(trading_days).max(MIN_HISTORY - 1);
+        let mut written = 0usize;
+        let mut first_date = None;
+        let mut last_date = None;
+
+        for i in start_idx..bars.len() {
+            let signal = calculate_signal(&instrument.id, &bars[..=i]);
+            db.upsert_signal(&signal)?;
+            written += 1;
+            if first_date.is_none() {
+                first_date = Some(signal.trade_date);
+            }
+            last_date = Some(signal.trade_date);
+        }
+
+        info!(
+            instrument_id = %instrument.id,
+            written,
+            %start_idx,
+            total = bars.len(),
+            "backfilled signals"
+        );
+        instruments.push(BackfillInstrumentSummary {
+            instrument_id: instrument.id.clone(),
+            bars_total: bars.len(),
+            signals_written: written,
+            first_trade_date: first_date,
+            last_trade_date: last_date,
+        });
+    }
+
+    Ok(BackfillSummary { instruments })
+}
+
+pub(crate) fn calculate_signal(instrument_id: &str, bars: &[DailyBar]) -> Signal {
     let fallback_date = bars
         .last()
         .map(|bar| bar.trade_date)
@@ -205,9 +294,19 @@ mod tests {
     use chrono::NaiveDate;
 
     #[test]
+    fn backfill_window_matches_full_series_at_end() {
+        let bars = make_bars(100.0, 0.12, 180);
+        let full = calculate_signal("foo", &bars);
+        let window = calculate_signal("foo", &bars[..180]);
+        assert_eq!(full.trade_date, window.trade_date);
+        assert_eq!(full.action, window.action);
+        assert_eq!(full.score, window.score);
+    }
+
+    #[test]
     fn rising_trend_gets_positive_score() {
         let bars = make_bars(100.0, 0.12, 180);
-        let signal = calculate_signal("foo", bars);
+        let signal = calculate_signal("foo", &bars);
         assert_eq!(signal.action, SignalAction::Buy);
         assert!(signal.score > 0);
         assert!(signal
@@ -219,7 +318,7 @@ mod tests {
     #[test]
     fn falling_trend_gets_negative_score() {
         let bars = make_bars(100.0, -0.12, 180);
-        let signal = calculate_signal("foo", bars);
+        let signal = calculate_signal("foo", &bars);
         assert_eq!(signal.action, SignalAction::Sell);
         assert!(signal.score < 0);
         assert!(signal
@@ -231,7 +330,7 @@ mod tests {
     #[test]
     fn insufficient_history_holds() {
         let bars = make_bars(1.0, 1.0, 80);
-        let signal = calculate_signal("foo", bars);
+        let signal = calculate_signal("foo", &bars);
         assert_eq!(signal.action, SignalAction::Hold);
         assert_eq!(signal.score, 0);
         assert!(signal.reasons[0].contains("insufficient_history"));
@@ -247,7 +346,7 @@ mod tests {
         last.high = last.close;
         last.low = last.close;
         bars.push(last);
-        let signal = calculate_signal("foo", bars);
+        let signal = calculate_signal("foo", &bars);
         assert!(signal.score < 45);
         assert!(signal
             .reasons

@@ -185,27 +185,6 @@ impl Database {
         Ok(())
     }
 
-    pub fn daily_bars_in_range(
-        &self,
-        instrument_id: &str,
-        start: NaiveDate,
-        end: NaiveDate,
-    ) -> Result<Vec<DailyBar>> {
-        let mut stmt = self.conn.prepare(
-            r#"
-            SELECT instrument_id, trade_date, open, high, low, close, volume, amount, source
-            FROM daily_bars
-            WHERE instrument_id = ?1 AND trade_date >= ?2 AND trade_date <= ?3
-            ORDER BY trade_date ASC
-            "#,
-        )?;
-        let rows = stmt.query_map(
-            params![instrument_id, start.to_string(), end.to_string()],
-            daily_bar_from_row,
-        )?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
-
     pub fn earliest_bar_date(&self, instrument_id: &str) -> Result<Option<NaiveDate>> {
         let value: Option<String> = self
             .conn
@@ -255,6 +234,20 @@ impl Database {
                 created_at: row.get(4)?,
             })
         })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// 按交易日升序的全部日线（用于历史信号回补）。
+    pub fn daily_bars_ascending(&self, instrument_id: &str) -> Result<Vec<DailyBar>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT instrument_id, trade_date, open, high, low, close, volume, amount, source
+            FROM daily_bars
+            WHERE instrument_id = ?1
+            ORDER BY trade_date ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![instrument_id], daily_bar_from_row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -340,6 +333,22 @@ impl Database {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    /// 按交易日倒序的全部历史信号（每个 trade_date 一条），用于统计连续买入/卖出天数。
+    pub fn recent_signals(&self, instrument_id: &str) -> Result<Vec<Signal>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT instrument_id, trade_date, action, score, reason, source, close,
+                   ma20, ma60, ma120, deviation_ma60_pct, deviation_ma120_pct,
+                   change_60d_pct, drawdown_120d_pct, generated_at
+            FROM signals
+            WHERE instrument_id = ?1
+            ORDER BY trade_date DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![instrument_id], signal_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
 
