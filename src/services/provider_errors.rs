@@ -131,16 +131,10 @@ fn friendly_http_message(raw: &str) -> String {
         return "网络请求失败（连接超时或目标不可达）".to_string();
     }
     if raw.contains("HTTP status client error") {
-        return format!(
-            "HTTP 客户端错误{}",
-            extract_http_status_suffix(raw)
-        );
+        return format!("HTTP 客户端错误{}", extract_http_status_suffix(raw));
     }
     if raw.contains("HTTP status server error") {
-        return format!(
-            "HTTP 服务端错误{}",
-            extract_http_status_suffix(raw)
-        );
+        return format!("HTTP 服务端错误{}", extract_http_status_suffix(raw));
     }
     if raw.contains("timed out") || raw.contains("timeout") {
         return "请求超时".to_string();
@@ -226,7 +220,13 @@ fn truncate(value: &str, max: usize) -> String {
     if value.chars().count() <= max {
         value.to_string()
     } else {
-        format!("{}…", value.chars().take(max.saturating_sub(1)).collect::<String>())
+        format!(
+            "{}…",
+            value
+                .chars()
+                .take(max.saturating_sub(1))
+                .collect::<String>()
+        )
     }
 }
 

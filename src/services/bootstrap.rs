@@ -1,7 +1,9 @@
 use crate::config::Config;
 use crate::db::Database;
 use crate::providers::stooq::resolve_stooq_symbol;
-use crate::services::provider_errors::{format_error, record_empty_response, record_provider_error};
+use crate::services::provider_errors::{
+    format_error, record_empty_response, record_provider_error,
+};
 use crate::services::updater::{
     fetch_with_retries, select_instruments, InstrumentUpdateSummary, UpdateSummary,
 };

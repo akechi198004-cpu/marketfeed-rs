@@ -2,7 +2,8 @@ use crate::config::{Config, InstrumentConfig};
 use crate::db::Database;
 use crate::models::DailyBar;
 use crate::providers::{
-    alpha_vantage::AlphaVantageProvider, eastmoney::EastmoneyProvider,
+    alpha_vantage::AlphaVantageProvider,
+    eastmoney::EastmoneyProvider,
     stooq::{resolve_stooq_symbol, StooqProvider},
     MarketDataProvider, ProviderError, ProviderErrorKind,
 };
@@ -92,7 +93,10 @@ pub async fn update(
         }
 
         match fetch_for_update(config, db, instrument, start, end).await {
-            UpdateFetchResult::Success { bars, provider_used } => {
+            UpdateFetchResult::Success {
+                bars,
+                provider_used,
+            } => {
                 let count = db.upsert_daily_bars(&bars)?;
                 info!(
                     instrument_id = %instrument.id,
@@ -140,7 +144,8 @@ pub async fn update(
     }
 
     let end = range_end.unwrap_or_else(date::today_utc);
-    let start = range_start.unwrap_or_else(|| end - Duration::days(config.update.default_lookback_days));
+    let start =
+        range_start.unwrap_or_else(|| end - Duration::days(config.update.default_lookback_days));
 
     Ok(UpdateSummary {
         start,

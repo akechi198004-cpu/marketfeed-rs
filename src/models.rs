@@ -23,11 +23,13 @@ pub struct Signal {
     pub reasons: Vec<String>,
     pub source: String,
     pub close: f64,
-    pub ma5: Option<f64>,
     pub ma20: Option<f64>,
     pub ma60: Option<f64>,
-    pub deviation_ma20_pct: Option<f64>,
-    pub change_20d_pct: Option<f64>,
+    pub ma120: Option<f64>,
+    pub deviation_ma60_pct: Option<f64>,
+    pub deviation_ma120_pct: Option<f64>,
+    pub change_60d_pct: Option<f64>,
+    pub drawdown_120d_pct: Option<f64>,
     pub generated_at: chrono::DateTime<Utc>,
 }
 

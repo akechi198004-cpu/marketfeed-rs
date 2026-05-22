@@ -110,22 +110,22 @@ mod tests {
 
     #[test]
     fn rising_sequence_returns_positive() {
-        let bars = make_bars(1.0, 1.0, 100);
-        let result = backtest_bars(&bars, bars[0].trade_date, bars[99].trade_date).unwrap();
+        let bars = make_bars(100.0, 0.12, 180);
+        let result = backtest_bars(&bars, bars[0].trade_date, bars[179].trade_date).unwrap();
         assert!(result.total_return_pct > 0.0);
     }
 
     #[test]
     fn falling_sequence_controls_loss_vs_buy_hold() {
-        let bars = make_bars(100.0, -0.8, 100);
-        let result = backtest_bars(&bars, bars[0].trade_date, bars[99].trade_date).unwrap();
+        let bars = make_bars(100.0, -0.12, 180);
+        let result = backtest_bars(&bars, bars[0].trade_date, bars[179].trade_date).unwrap();
         assert!(result.total_return_pct >= result.buy_and_hold_return_pct);
     }
 
     #[test]
     fn sideways_sequence_is_explainable() {
         let base = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
-        let bars: Vec<_> = (0..100)
+        let bars: Vec<_> = (0..180)
             .map(|idx| {
                 let close = 100.0 + if idx % 2 == 0 { 1.0 } else { -1.0 };
                 DailyBar {
@@ -141,10 +141,10 @@ mod tests {
                 }
             })
             .collect();
-        let result = backtest_bars(&bars, bars[0].trade_date, bars[99].trade_date).unwrap();
+        let result = backtest_bars(&bars, bars[0].trade_date, bars[179].trade_date).unwrap();
         assert!(result.max_drawdown_pct <= 0.0);
         assert!(result.final_cash.is_finite());
-        assert!(result.trades > 0);
+        assert!(result.trades <= 2);
     }
 
     fn make_bars(start: f64, step: f64, len: usize) -> Vec<DailyBar> {

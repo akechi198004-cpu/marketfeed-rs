@@ -41,11 +41,9 @@ pub async fn send_report_email(config: &Config, db: &Database, date: NaiveDate) 
         .subject(subject.clone());
 
     for recipient in email_cfg.recipients() {
-        builder = builder.to(
-            recipient
-                .parse()
-                .with_context(|| format!("invalid report.email.to address: {recipient}"))?,
-        );
+        builder = builder.to(recipient
+            .parse()
+            .with_context(|| format!("invalid report.email.to address: {recipient}"))?);
     }
 
     let message = builder
@@ -64,12 +62,8 @@ pub async fn send_report_email(config: &Config, db: &Database, date: NaiveDate) 
         )
         .context("failed to build HTML email")?;
 
-    let username = email_cfg
-        .smtp_username()
-        .context("missing SMTP username")?;
-    let password = email_cfg
-        .smtp_password()
-        .context("missing SMTP password")?;
+    let username = email_cfg.smtp_username().context("missing SMTP username")?;
+    let password = email_cfg.smtp_password().context("missing SMTP password")?;
 
     let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&email_cfg.smtp_host)
         .with_context(|| format!("invalid SMTP relay host {}", email_cfg.smtp_host))?

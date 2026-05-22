@@ -30,11 +30,13 @@ impl Database {
     }
 
     fn apply_light_migrations(&self) -> Result<()> {
-        self.try_add_column("signals", "ma5", "ma5 REAL")?;
         self.try_add_column("signals", "ma20", "ma20 REAL")?;
         self.try_add_column("signals", "ma60", "ma60 REAL")?;
-        self.try_add_column("signals", "deviation_ma20_pct", "deviation_ma20_pct REAL")?;
-        self.try_add_column("signals", "change_20d_pct", "change_20d_pct REAL")?;
+        self.try_add_column("signals", "ma120", "ma120 REAL")?;
+        self.try_add_column("signals", "deviation_ma60_pct", "deviation_ma60_pct REAL")?;
+        self.try_add_column("signals", "deviation_ma120_pct", "deviation_ma120_pct REAL")?;
+        self.try_add_column("signals", "change_60d_pct", "change_60d_pct REAL")?;
+        self.try_add_column("signals", "drawdown_120d_pct", "drawdown_120d_pct REAL")?;
         self.try_add_column("provider_errors", "error_start", "error_start TEXT")?;
         self.try_add_column("provider_errors", "error_end", "error_end TEXT")?;
         self.try_add_column(
@@ -282,19 +284,22 @@ impl Database {
             r#"
             INSERT INTO signals (
                 instrument_id, trade_date, action, score, reason, source, close,
-                ma5, ma20, ma60, deviation_ma20_pct, change_20d_pct, generated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                ma20, ma60, ma120, deviation_ma60_pct, deviation_ma120_pct,
+                change_60d_pct, drawdown_120d_pct, generated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ON CONFLICT(instrument_id, trade_date) DO UPDATE SET
                 action = excluded.action,
                 score = excluded.score,
                 reason = excluded.reason,
                 source = excluded.source,
                 close = excluded.close,
-                ma5 = excluded.ma5,
                 ma20 = excluded.ma20,
                 ma60 = excluded.ma60,
-                deviation_ma20_pct = excluded.deviation_ma20_pct,
-                change_20d_pct = excluded.change_20d_pct,
+                ma120 = excluded.ma120,
+                deviation_ma60_pct = excluded.deviation_ma60_pct,
+                deviation_ma120_pct = excluded.deviation_ma120_pct,
+                change_60d_pct = excluded.change_60d_pct,
+                drawdown_120d_pct = excluded.drawdown_120d_pct,
                 generated_at = excluded.generated_at
             "#,
             params![
@@ -305,11 +310,13 @@ impl Database {
                 reasons,
                 signal.source,
                 signal.close,
-                signal.ma5,
                 signal.ma20,
                 signal.ma60,
-                signal.deviation_ma20_pct,
-                signal.change_20d_pct,
+                signal.ma120,
+                signal.deviation_ma60_pct,
+                signal.deviation_ma120_pct,
+                signal.change_60d_pct,
+                signal.drawdown_120d_pct,
                 signal.generated_at.to_rfc3339(),
             ],
         )?;
@@ -321,7 +328,8 @@ impl Database {
             .query_row(
                 r#"
                 SELECT instrument_id, trade_date, action, score, reason, source, close,
-                       ma5, ma20, ma60, deviation_ma20_pct, change_20d_pct, generated_at
+                       ma20, ma60, ma120, deviation_ma60_pct, deviation_ma120_pct,
+                       change_60d_pct, drawdown_120d_pct, generated_at
                 FROM signals
                 WHERE instrument_id = ?1
                 ORDER BY generated_at DESC, trade_date DESC
@@ -354,7 +362,7 @@ fn signal_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Signal> {
     let trade_date: String = row.get(1)?;
     let action: String = row.get(2)?;
     let reason: String = row.get(4)?;
-    let generated_at: String = row.get(12)?;
+    let generated_at: String = row.get(14)?;
     Ok(Signal {
         instrument_id: row.get(0)?,
         trade_date: parse_date_for_sqlite(&trade_date, 1)?,
@@ -363,11 +371,13 @@ fn signal_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Signal> {
         reasons: parse_reasons(&reason),
         source: row.get(5)?,
         close: row.get(6)?,
-        ma5: row.get(7)?,
-        ma20: row.get(8)?,
-        ma60: row.get(9)?,
-        deviation_ma20_pct: row.get(10)?,
-        change_20d_pct: row.get(11)?,
+        ma20: row.get(7)?,
+        ma60: row.get(8)?,
+        ma120: row.get(9)?,
+        deviation_ma60_pct: row.get(10)?,
+        deviation_ma120_pct: row.get(11)?,
+        change_60d_pct: row.get(12)?,
+        drawdown_120d_pct: row.get(13)?,
         generated_at: DateTime::parse_from_rfc3339(&generated_at)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
@@ -435,11 +445,13 @@ CREATE TABLE IF NOT EXISTS signals (
     reason TEXT NOT NULL,
     source TEXT NOT NULL,
     close REAL NOT NULL,
-    ma5 REAL,
     ma20 REAL,
     ma60 REAL,
-    deviation_ma20_pct REAL,
-    change_20d_pct REAL,
+    ma120 REAL,
+    deviation_ma60_pct REAL,
+    deviation_ma120_pct REAL,
+    change_60d_pct REAL,
+    drawdown_120d_pct REAL,
     generated_at TEXT NOT NULL,
     PRIMARY KEY (instrument_id, trade_date),
     FOREIGN KEY (instrument_id) REFERENCES instruments(id)

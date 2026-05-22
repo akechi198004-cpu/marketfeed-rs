@@ -81,8 +81,7 @@ pub(crate) fn build_report(
         instruments,
         provider_errors: filter_relevant_provider_errors(db, date)?,
         freshness,
-        disclaimer: "本报告为规则型行情整理输出，不构成任何投资建议。"
-            .to_string(),
+        disclaimer: "本报告为规则型行情整理输出，不构成任何投资建议。".to_string(),
     })
 }
 
@@ -477,11 +476,13 @@ mod tests {
             reasons: vec!["close > ma20".to_string()],
             source: "test".to_string(),
             close: 100.0,
-            ma5: Some(99.0),
             ma20: Some(95.0),
             ma60: Some(90.0),
-            deviation_ma20_pct: Some(5.0),
-            change_20d_pct: Some(10.0),
+            ma120: Some(85.0),
+            deviation_ma60_pct: Some(11.1),
+            deviation_ma120_pct: Some(17.6),
+            change_60d_pct: Some(10.0),
+            drawdown_120d_pct: Some(-2.0),
             generated_at: Utc::now(),
         };
         db.upsert_signal(&signal).unwrap();
