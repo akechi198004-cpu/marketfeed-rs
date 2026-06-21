@@ -2,7 +2,7 @@
 path = "marketfeed.sqlite"
 
 [providers]
-stooq_enabled = true
+stooq_enabled = false
 alpha_vantage_enabled = true
 eastmoney_enabled = true
 

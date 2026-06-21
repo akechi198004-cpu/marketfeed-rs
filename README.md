@@ -40,6 +40,10 @@ scp marketfeed-deploy/marketfeed opc@你的主机:~/marketfeed-deploy/
 
 敏感项建议用环境变量：`ALPHA_VANTAGE_API_KEY`、`STOOQ_API_KEY`、`MARKETFEED_SMTP_USER`、`MARKETFEED_SMTP_PASS`。
 
+## 历史记录
+
+- 2026-06-21：Stooq 对上证指数 `^shc` 返回浏览器验证页，已不适合作为上证指数来源；配置中将 `stooq_enabled` 设为 `false`，上证指数使用东方财富 `eastmoney`（`eastmoney_secid = "1.000001"`）。
+
 ## 文档
 
 - [doc/README.md](doc/README.md) — 文档索引与部署
@@ -49,3 +53,7 @@ scp marketfeed-deploy/marketfeed opc@你的主机:~/marketfeed-deploy/
 ## License
 
 MIT（如未另行说明）
+
+
+本番部署：
+Oracle Osaka2
