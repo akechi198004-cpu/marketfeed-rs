@@ -56,5 +56,3 @@ scp marketfeed-deploy/marketfeed opc@你的主机:~/marketfeed-deploy/
 MIT（如未另行说明）
 
 
-本番部署：
-Oracle Osaka2
