@@ -38,50 +38,33 @@ impl EastmoneyProvider {
                 format!("cannot derive Eastmoney fund code from {}", instrument.id),
             )
         })?;
-        let mut all = Vec::new();
-        let mut page = 1;
-        let per = 200;
 
-        loop {
-            let mut url = Url::parse(&self.fund_base_url)?;
-            url.query_pairs_mut()
-                .append_pair("type", "lsjz")
-                .append_pair("code", &code)
-                .append_pair("page", &page.to_string())
-                .append_pair("per", &per.to_string());
+        let base = self.fund_base_url.trim_end_matches('/');
+        let url = format!("{base}/{code}.js");
 
-            let body = self
-                .client
-                .get(url)
-                .header(reqwest::header::REFERER, "https://fund.eastmoney.com/")
-                .send()
-                .await
-                .map_err(|err| {
-                    ProviderError::new(self.name(), ProviderErrorKind::Http, err.to_string())
-                })?
-                .error_for_status()
-                .map_err(|err| {
-                    ProviderError::new(self.name(), ProviderErrorKind::Http, err.to_string())
-                })?
-                .text()
-                .await
-                .map_err(|err| {
-                    ProviderError::new(self.name(), ProviderErrorKind::Http, err.to_string())
-                })?;
+        let body = self
+            .client
+            .get(&url)
+            .header(reqwest::header::REFERER, "https://fund.eastmoney.com/")
+            .send()
+            .await
+            .map_err(|err| {
+                ProviderError::new(self.name(), ProviderErrorKind::Http, err.to_string())
+            })?
+            .error_for_status()
+            .map_err(|err| {
+                ProviderError::new(self.name(), ProviderErrorKind::Http, err.to_string())
+            })?
+            .text()
+            .await
+            .map_err(|err| {
+                ProviderError::new(self.name(), ProviderErrorKind::Http, err.to_string())
+            })?;
 
-            let page_bars = parse_eastmoney_fund_nav(&instrument.id, &body, "eastmoney_fund")?;
-            let oldest = page_bars.last().map(|bar| bar.trade_date);
-            all.extend(
-                page_bars
-                    .into_iter()
-                    .filter(|bar| bar.trade_date >= start && bar.trade_date <= end),
-            );
-
-            if oldest.is_none_or(|date| date < start) || !fund_response_has_next_page(&body, page) {
-                break;
-            }
-            page += 1;
-        }
+        let mut all: Vec<DailyBar> = parse_eastmoney_fund_nav(&instrument.id, &body, "eastmoney_fund")?
+            .into_iter()
+            .filter(|bar| bar.trade_date >= start && bar.trade_date <= end)
+            .collect();
 
         if all.is_empty() {
             return Err(ProviderError::new(
@@ -326,23 +309,35 @@ pub(crate) fn parse_eastmoney_fund_nav(
     body: &str,
     source: &'static str,
 ) -> Result<Vec<DailyBar>> {
-    if !body.contains("var apidata") || !body.contains("<tbody>") {
-        return Err(ProviderError::new(
+    let json = extract_js_array(body, "Data_netWorthTrend").ok_or_else(|| {
+        ProviderError::new(
             source,
             ProviderErrorKind::MalformedResponse,
-            "Eastmoney fund response missing apidata table",
+            "Eastmoney fund response missing Data_netWorthTrend",
+        )
+    })?;
+
+    let points: Vec<FundNetWorthPoint> = serde_json::from_str(json).map_err(|err| {
+        ProviderError::new(
+            source,
+            ProviderErrorKind::MalformedResponse,
+            format!("Eastmoney fund Data_netWorthTrend JSON invalid: {err}"),
+        )
+    })?;
+
+    if points.is_empty() {
+        return Err(ProviderError::new(
+            source,
+            ProviderErrorKind::NoData,
+            "Eastmoney fund Data_netWorthTrend is empty",
         )
         .into());
     }
 
-    let mut bars = Vec::new();
-    for row in body.split("<tr>").skip(1) {
-        let cells = extract_td_texts(row);
-        if cells.len() < 2 {
-            continue;
-        }
-        let trade_date = parse_date(source, &cells[0])?;
-        let nav = parse_f64(source, &cells[1], "unit_nav")?;
+    let mut bars = Vec::with_capacity(points.len());
+    for point in points {
+        let trade_date = nav_timestamp_to_date(point.x, source)?;
+        let nav = point.y;
         bars.push(DailyBar {
             instrument_id: instrument_id.to_string(),
             trade_date,
@@ -358,53 +353,69 @@ pub(crate) fn parse_eastmoney_fund_nav(
         });
     }
 
-    if bars.is_empty() {
-        return Err(ProviderError::new(
-            source,
-            ProviderErrorKind::NoData,
-            "Eastmoney fund table has no NAV rows",
-        )
-        .into());
-    }
     bars.sort_by_key(|bar| bar.trade_date);
     Ok(bars)
 }
 
-fn extract_td_texts(row: &str) -> Vec<String> {
-    let mut cells = Vec::new();
-    for part in row.split("<td").skip(1) {
-        if let Some(after_open) = part.split_once('>') {
-            if let Some((raw, _)) = after_open.1.split_once("</td>") {
-                cells.push(strip_tags(raw).trim().to_string());
-            }
-        }
-    }
-    cells
+#[derive(Debug, Deserialize)]
+struct FundNetWorthPoint {
+    x: i64,
+    y: f64,
 }
 
-fn strip_tags(value: &str) -> String {
-    let mut output = String::new();
-    let mut in_tag = false;
-    for ch in value.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => output.push(ch),
+/// `Data_netWorthTrend.x` is milliseconds at Asia/Shanghai midnight for that NAV date.
+fn nav_timestamp_to_date(ms: i64, source: &'static str) -> Result<NaiveDate> {
+    let china = chrono::FixedOffset::east_opt(8 * 3600).expect("fixed +08:00");
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|dt| dt.with_timezone(&china).date_naive())
+        .ok_or_else(|| {
+            ProviderError::new(
+                source,
+                ProviderErrorKind::MalformedResponse,
+                format!("Eastmoney fund invalid NAV timestamp {ms}"),
+            )
+            .into()
+        })
+}
+
+/// Extract a top-level JS array assigned to `var_name` (e.g. `Data_netWorthTrend = [...]`).
+fn extract_js_array<'a>(body: &'a str, var_name: &str) -> Option<&'a str> {
+    let marker = body.find(var_name)?;
+    let after_name = &body[marker + var_name.len()..];
+    let eq = after_name.find('=')?;
+    let after_eq = after_name[eq + 1..].trim_start();
+    if !after_eq.starts_with('[') {
+        return None;
+    }
+
+    let bytes = after_eq.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (idx, &byte) in bytes.iter().enumerate() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if byte == b'\\' {
+                escape = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&after_eq[..=idx]);
+                }
+            }
             _ => {}
         }
     }
-    output
-}
-
-fn fund_response_has_next_page(body: &str, page: usize) -> bool {
-    let Some(pages_start) = body.find("pages:") else {
-        return false;
-    };
-    let pages_text = body[pages_start + "pages:".len()..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    pages_text.parse::<usize>().is_ok_and(|pages| page < pages)
+    None
 }
 
 #[cfg(test)]
@@ -463,26 +474,83 @@ mod tests {
 
     #[test]
     fn parses_fund_nav_response() {
-        let fixture = r#"var apidata={ content:"<table><tbody><tr><td>2026-05-20</td><td class='tor bold'>1.5739</td><td>1.5739</td></tr><tr><td>2026-05-19</td><td class='tor bold'>1.5539</td><td>1.5539</td></tr></tbody></table>",records:2,pages:1,curpage:1};"#;
+        // Timestamps are Asia/Shanghai midnight (UTC+8), matching Eastmoney pingzhongdata.
+        let fixture = r#"
+            var fS_name = "中欧量化驱动混合A";
+            var Data_netWorthTrend = [{"x":1716048000000,"y":1.5539,"equityReturn":-1.2,"unitMoney":""},{"x":1716134400000,"y":1.5739,"equityReturn":1.29,"unitMoney":""}];
+            var Data_ACWorthTrend = [];
+        "#;
         let bars = parse_eastmoney_fund_nav("fund501203", fixture, "eastmoney_fund").unwrap();
         assert_eq!(bars.len(), 2);
         assert_eq!(
             bars[0].trade_date,
-            NaiveDate::from_ymd_opt(2026, 5, 19).unwrap()
+            NaiveDate::from_ymd_opt(2024, 5, 19).unwrap()
+        );
+        assert_eq!(bars[0].close, 1.5539);
+        assert_eq!(
+            bars[1].trade_date,
+            NaiveDate::from_ymd_opt(2024, 5, 20).unwrap()
         );
         assert_eq!(bars[1].close, 1.5739);
+        assert_eq!(bars[1].open, 1.5739);
         assert_eq!(bars[1].volume, None);
     }
 
     #[test]
-    fn detects_next_fund_page() {
-        assert!(fund_response_has_next_page(
-            "var apidata={pages:3,curpage:1};",
-            1
-        ));
-        assert!(!fund_response_has_next_page(
-            "var apidata={pages:3,curpage:3};",
-            3
-        ));
+    fn rejects_fund_response_without_net_worth_trend() {
+        let err = parse_eastmoney_fund_nav("fund001980", "var apidata=", "eastmoney_fund")
+            .unwrap_err();
+        let provider_err = err.downcast_ref::<ProviderError>().unwrap();
+        assert_eq!(provider_err.kind, ProviderErrorKind::MalformedResponse);
+        assert!(provider_err.raw_message.contains("Data_netWorthTrend"));
+    }
+
+    #[test]
+    fn rejects_empty_fund_net_worth_trend() {
+        let fixture = r#"Data_netWorthTrend = [];"#;
+        let err = parse_eastmoney_fund_nav("fund001980", fixture, "eastmoney_fund").unwrap_err();
+        let provider_err = err.downcast_ref::<ProviderError>().unwrap();
+        assert_eq!(provider_err.kind, ProviderErrorKind::NoData);
+    }
+
+    #[tokio::test]
+    async fn live_fetches_fund_nav_from_pingzhongdata() {
+        let provider = EastmoneyProvider::new(
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+            "https://fund.eastmoney.com/pingzhongdata",
+        );
+        let instrument = InstrumentConfig {
+            id: "fund001980".to_string(),
+            name: "001980".to_string(),
+            kind: crate::config::InstrumentKind::Etf,
+            market: "FUND".to_string(),
+            currency: "CNY".to_string(),
+            timezone: "Asia/Shanghai".to_string(),
+            stooq_symbol: None,
+            alpha_vantage_symbol: None,
+            eastmoney_secid: None,
+            eastmoney_fund_code: Some("001980".to_string()),
+            provider: "eastmoney".to_string(),
+        };
+        let end = NaiveDate::from_ymd_opt(2026, 7, 21).unwrap();
+        let start = end - chrono::Duration::days(14);
+        let bars = provider
+            .fetch_daily_bars(&instrument, start, end)
+            .await
+            .expect("live fund NAV fetch should succeed");
+        assert!(!bars.is_empty());
+        assert!(bars.iter().all(|bar| bar.close > 0.0));
+        assert!(bars.first().unwrap().trade_date >= start);
+        assert!(bars.last().unwrap().trade_date <= end);
+        assert_eq!(bars.last().unwrap().source, "eastmoney_fund");
+        // Latest published NAV should fall within a few sessions of `end`.
+        assert!(end.signed_duration_since(bars.last().unwrap().trade_date).num_days() <= 5);
+    }
+
+    #[test]
+    fn fund_nav_timestamp_uses_shanghai_calendar_date() {
+        // 2026-07-21 00:00:00 +08:00
+        let date = nav_timestamp_to_date(1_784_563_200_000, "eastmoney_fund").unwrap();
+        assert_eq!(date, NaiveDate::from_ymd_opt(2026, 7, 21).unwrap());
     }
 }

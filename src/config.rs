@@ -411,7 +411,7 @@ fn default_eastmoney_base_url() -> String {
     "https://push2his.eastmoney.com/api/qt/stock/kline/get".to_string()
 }
 fn default_eastmoney_fund_base_url() -> String {
-    "https://fundf10.eastmoney.com/F10DataApi.aspx".to_string()
+    "https://fund.eastmoney.com/pingzhongdata".to_string()
 }
 fn default_lookback_days() -> i64 {
     7

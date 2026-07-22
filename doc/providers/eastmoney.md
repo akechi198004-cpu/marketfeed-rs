@@ -8,7 +8,7 @@
 东方财富数据源，支持两类标的：
 
 1. **股票 / 指数 K 线** — JSON API
-2. **基金净值** — HTML 分页 API
+2. **基金净值** — `pingzhongdata/{code}.js`（嵌入 `Data_netWorthTrend`）
 
 无需 API Key，但基金接口需设置 `Referer: https://fund.eastmoney.com/`。
 
@@ -88,35 +88,25 @@
 
 | 项 | 值 |
 |----|-----|
-| 默认 URL | `https://fundf10.eastmoney.com/F10DataApi.aspx` |
+| 默认 URL | `https://fund.eastmoney.com/pingzhongdata` |
+| 实际请求 | `{fund_base_url}/{code}.js` |
 | 方法 | GET |
-| 响应 | HTML + 嵌入 JS 变量 `apidata` |
+| 响应 | JS，含 `Data_netWorthTrend = [{x,y,...}, ...]` |
 
-### 请求参数
+> 旧接口 `F10DataApi.aspx?type=lsjz` 已空返回，不可再用。
 
-| 参数 | 说明 |
-|------|------|
-| `type` | 固定 `lsjz`（历史净值） |
-| `code` | 基金代码 |
-| `page` | 页码（从 1 开始） |
-| `per` | 每页条数（固定 200） |
+### 拉取逻辑
 
-### 分页逻辑
+`fetch_fund_bars` 一次下载全量历史净值，再按 `[start, end]` 过滤、排序、去重。
 
-`fetch_fund_bars` 循环请求：
+### JS 解析
 
-1. 解析当前页 NAV 行，过滤到 `[start, end]` 范围
-2. 若最旧日期仍 ≥ `start` 且 `fund_response_has_next_page` 为真，继续下一页
-3. 合并、排序、去重后返回
+从响应中提取 `Data_netWorthTrend` 数组：
 
-### HTML 解析
-
-响应需包含 `var apidata` 与 `<tbody>`。从 `<tr>` 行中提取 `<td>` 文本：
-
-- 第 1 列：日期
-- 第 2 列：单位净值
-
-基金无 OHLC，将净值复制到 open/high/low/close 四个字段。
+| 字段 | 含义 | 映射 |
+|------|------|------|
+| `x` | 毫秒时间戳（**北京时间**当日 00:00） | `trade_date` |
+| `y` | 单位净值 | open/high/low/close（基金无 OHLC，四处同值） |
 
 ### 基金代码解析
 
@@ -130,7 +120,7 @@
 ```toml
 [providers.eastmoney]
 base_url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-fund_base_url = "https://fundf10.eastmoney.com/F10DataApi.aspx"
+fund_base_url = "https://fund.eastmoney.com/pingzhongdata"
 
 # 指数
 [[instruments]]
@@ -154,5 +144,5 @@ eastmoney_fund_code = "501203"
 | 无法推导 secid / fund code | `UnsupportedInstrument` |
 | HTTP 失败 | `Http` |
 | JSON 解析失败 / kline 字段数不对 | `MalformedResponse` |
-| data=null / 空 klines / 空 NAV 表 | `NoData` |
-| 基金响应缺少 apidata | `MalformedResponse` |
+| data=null / 空 klines / 空 NAV | `NoData` |
+| 基金响应缺少 `Data_netWorthTrend` | `MalformedResponse` |

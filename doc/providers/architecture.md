@@ -99,7 +99,7 @@ pub struct ProviderError {
 | Stooq | CSV | `utils/csv::parse_stooq_daily` |
 | Alpha Vantage | JSON 或 CSV | `alpha_vantage.rs` + `utils/csv::parse_alpha_vantage_csv_daily` |
 | Eastmoney 股票 | JSON | `eastmoney.rs::parse_eastmoney_daily` |
-| Eastmoney 基金 | HTML（嵌入 JS） | `eastmoney.rs::parse_eastmoney_fund_nav` |
+| Eastmoney 基金 | JS（`Data_netWorthTrend`） | `eastmoney.rs::parse_eastmoney_fund_nav` |
 
 ## Provider 工厂
 

@@ -42,6 +42,7 @@ scp marketfeed-deploy/marketfeed opc@你的主机:~/marketfeed-deploy/
 
 ## 历史记录
 
+- 2026-07-22：东方财富旧基金净值接口 `F10DataApi.aspx` 空返回，改用 `pingzhongdata/{code}.js` 的 `Data_netWorthTrend`。
 - 2026-06-21：Stooq 对上证指数 `^shc` 返回浏览器验证页，已不适合作为上证指数来源；配置中将 `stooq_enabled` 设为 `false`，上证指数使用东方财富 `eastmoney`（`eastmoney_secid = "1.000001"`）。
 
 ## 文档

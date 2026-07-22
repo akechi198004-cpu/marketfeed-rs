@@ -38,7 +38,7 @@ base_url = "https://www.alphavantage.co/query"
 ```toml
 [providers.eastmoney]
 base_url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-fund_base_url = "https://fundf10.eastmoney.com/F10DataApi.aspx"
+fund_base_url = "https://fund.eastmoney.com/pingzhongdata"
 ```
 
 ## 更新行为配置
